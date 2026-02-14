@@ -6,6 +6,8 @@ import Stripe from "stripe";
 import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
 
 dotenv.config();
+console.log("NODE_ENV:", process.env.NODE_ENV);
+console.log("STRIPE_SECRET_KEY:", process.env.STRIPE_SECRET_KEY ? "FOUND" : "MISSING");
 
 const app = express();
 

@@ -6,31 +6,43 @@ import Stripe from "stripe";
 import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
 
 dotenv.config();
-console.log("NODE_ENV:", process.env.NODE_ENV);
-console.log("STRIPE_SECRET_KEY:", process.env.STRIPE_SECRET_KEY ? "FOUND" : "MISSING");
 
 const app = express();
 
 /* -------------------- Middlewares -------------------- */
 app.use(express.json());
 
-// CORS
+/* -------------------- CORS (FIXED) -------------------- */
+// ✅ Add both firebase domains + optional extra env
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  process.env.CLIENT_URL, // firebase live url in production
+
+  // ✅ firebase hosting domains
+  "https://blood-donation-ph-b12a11.web.app",
+  "https://blood-donation-ph-b12a11.firebaseapp.com",
+
+  // ✅ keep env based
+  process.env.CLIENT_URL,
+  process.env.CLIENT_URL_2,
 ].filter(Boolean);
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // Postman / server-to-server
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error("CORS blocked for: " + origin));
-    },
-    credentials: true,
-  })
-);
+const corsOptions = {
+  origin: (origin, cb) => {
+    // allow Postman/server-to-server
+    if (!origin) return cb(null, true);
+
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+
+    return cb(new Error("CORS blocked for: " + origin));
+  },
+  credentials: true,
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
+// ✅ very important for preflight (OPTIONS)
+app.options("*", cors(corsOptions));
 
 /* -------------------- Stripe -------------------- */
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -46,14 +58,14 @@ const client = new MongoClient(uri, {
   },
 });
 
-// ✅ collections (global)
+// collections (global)
 let usersCollection;
 let requestsCollection;
 let fundingCollection;
 
-// ✅ connect helper (safe)
+// connect helper (safe)
 async function connectDB() {
-  if (usersCollection && requestsCollection && fundingCollection) return; // already connected
+  if (usersCollection && requestsCollection && fundingCollection) return;
 
   await client.connect();
   const db = client.db("bloodDonationDB");
@@ -65,7 +77,7 @@ async function connectDB() {
   console.log("✅ MongoDB connected");
 }
 
-// ✅ Ensure DB connection for ALL routes (safe)
+// Ensure DB connection for ALL routes (safe)
 app.use(async (req, res, next) => {
   try {
     await connectDB();
@@ -386,6 +398,7 @@ app.patch("/donation-requests/:id/confirm", verifyJWT, verifyDonor, async (req, 
   res.send(result);
 });
 
+// (keeping your donate route, but it’s identical to confirm — okay)
 app.patch("/donation-requests/:id/donate", verifyJWT, verifyDonor, async (req, res) => {
   const id = req.params.id;
   const email = req.decoded.email;
@@ -486,6 +499,8 @@ app.post("/create-checkout-session", verifyJWT, verifyActiveUser, async (req, re
 
     const unitAmount = Math.round(n * 100);
 
+    const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -503,8 +518,8 @@ app.post("/create-checkout-session", verifyJWT, verifyActiveUser, async (req, re
         email: email || req.decoded.email,
         name: name || "",
       },
-      success_url: `${process.env.CLIENT_URL}/funding?success=1&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL}/funding?canceled=1`,
+      success_url: `${clientUrl}/funding?success=1&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${clientUrl}/funding?canceled=1`,
     });
 
     res.send({ url: session.url });

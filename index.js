@@ -113,7 +113,8 @@ const verifyActiveUser = async (req, res, next) => {
   const user = await getDbUserByEmail(email);
 
   if (!user) return res.status(403).send({ message: "Forbidden" });
-  if (user.status === "blocked") return res.status(403).send({ message: "User blocked" });
+  if (user.status === "blocked")
+    return res.status(403).send({ message: "User blocked" });
 
   req.dbUser = user;
   next();
@@ -124,7 +125,8 @@ const verifyRole = (role) => async (req, res, next) => {
   const user = await getDbUserByEmail(email);
 
   if (!user) return res.status(403).send({ message: "Forbidden" });
-  if (user.status === "blocked") return res.status(403).send({ message: "User blocked" });
+  if (user.status === "blocked")
+    return res.status(403).send({ message: "User blocked" });
   if (user.role !== role) return res.status(403).send({ message: "Forbidden" });
 
   req.dbUser = user;
@@ -136,7 +138,8 @@ const verifyAdminOrVolunteer = async (req, res, next) => {
   const user = await getDbUserByEmail(email);
 
   if (!user) return res.status(403).send({ message: "Forbidden" });
-  if (user.status === "blocked") return res.status(403).send({ message: "User blocked" });
+  if (user.status === "blocked")
+    return res.status(403).send({ message: "User blocked" });
 
   if (!["admin", "volunteer"].includes(user.role)) {
     return res.status(403).send({ message: "Forbidden" });
@@ -151,8 +154,10 @@ const verifyDonor = async (req, res, next) => {
   const user = await getDbUserByEmail(email);
 
   if (!user) return res.status(403).send({ message: "Forbidden" });
-  if (user.status === "blocked") return res.status(403).send({ message: "User blocked" });
-  if (user.role !== "donor") return res.status(403).send({ message: "Only donor allowed" });
+  if (user.status === "blocked")
+    return res.status(403).send({ message: "User blocked" });
+  if (user.role !== "donor")
+    return res.status(403).send({ message: "Only donor allowed" });
 
   req.dbUser = user;
   next();
@@ -162,7 +167,8 @@ const canAccessRequestDetails = (reqUser, requestDoc) => {
   if (!reqUser || !requestDoc) return false;
   if (reqUser.role === "admin" || reqUser.role === "volunteer") return true;
   if (requestDoc.requesterEmail === reqUser.email) return true;
-  if (requestDoc.donorEmail && requestDoc.donorEmail === reqUser.email) return true;
+  if (requestDoc.donorEmail && requestDoc.donorEmail === reqUser.email)
+    return true;
   return false;
 };
 
@@ -178,32 +184,50 @@ app.post("/jwt", async (req, res) => {
 
   const user = await usersCollection.findOne({ email });
   if (!user) return res.status(401).send({ message: "User not found in DB" });
-  if (user.status === "blocked") return res.status(403).send({ message: "User blocked" });
+  if (user.status === "blocked")
+    return res.status(403).send({ message: "User blocked" });
 
-  const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: "7d" });
+  const token = jwt.sign({ email }, process.env.JWT_SECRET, {
+    expiresIn: "7d",
+  });
   res.send({ token });
 });
 
-// Users upsert
+/* ===========================================================
+   ✅ FIXED USERS UPSERT (IMPORTANT)
+   - New user: sets role=donor, status=active only once
+   - Existing user: NEVER overwrites role/status
+   =========================================================== */
 app.put("/users", async (req, res) => {
   const user = req.body;
   if (!user?.email) return res.status(400).send({ message: "email required" });
 
-  const doc = {
+  const existing = await usersCollection.findOne({ email: user.email });
+
+  const profileFields = {
     name: user.name || "",
     email: user.email,
     avatar: user.avatar || "",
     bloodGroup: user.bloodGroup || "",
     district: user.district || "",
     upazila: user.upazila || "",
-    role: user.role || "donor",
-    status: user.status || "active",
     updatedAt: new Date(),
   };
 
+  const updateDoc = existing
+    ? { $set: profileFields }
+    : {
+        $set: profileFields,
+        $setOnInsert: {
+          role: "donor",
+          status: "active",
+          createdAt: new Date(),
+        },
+      };
+
   const result = await usersCollection.updateOne(
     { email: user.email },
-    { $set: doc, $setOnInsert: { createdAt: new Date() } },
+    updateDoc,
     { upsert: true }
   );
 
@@ -230,7 +254,14 @@ app.get("/donors/search", async (req, res) => {
 
   const donors = await usersCollection
     .find(query, {
-      projection: { name: 1, email: 1, avatar: 1, bloodGroup: 1, district: 1, upazila: 1 },
+      projection: {
+        name: 1,
+        email: 1,
+        avatar: 1,
+        bloodGroup: 1,
+        district: 1,
+        upazila: 1,
+      },
     })
     .sort({ createdAt: -1 })
     .toArray();

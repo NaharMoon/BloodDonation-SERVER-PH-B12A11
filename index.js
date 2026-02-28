@@ -165,10 +165,19 @@ const verifyDonor = async (req, res, next) => {
 
 const canAccessRequestDetails = (reqUser, requestDoc) => {
   if (!reqUser || !requestDoc) return false;
+
+  // admin / volunteer can always access
   if (reqUser.role === "admin" || reqUser.role === "volunteer") return true;
+
+  // requester can access
   if (requestDoc.requesterEmail === reqUser.email) return true;
-  if (requestDoc.donorEmail && requestDoc.donorEmail === reqUser.email)
-    return true;
+
+  // donor assigned to this request can access
+  if (requestDoc.donorEmail && requestDoc.donorEmail === reqUser.email) return true;
+
+  // ✅ IMPORTANT: any donor can access pending request details to donate
+  if (requestDoc.status === "pending" && reqUser.role === "donor") return true;
+
   return false;
 };
 
@@ -204,20 +213,33 @@ app.put("/users", async (req, res) => {
 
   const existing = await usersCollection.findOne({ email: user.email });
 
-  const profileFields = {
-    name: user.name || "",
-    email: user.email,
-    avatar: user.avatar || "",
-    bloodGroup: user.bloodGroup || "",
-    district: user.district || "",
-    upazila: user.upazila || "",
+  // ✅ Only update fields that are actually provided (avoid overwriting with "")
+  const updateFields = {
     updatedAt: new Date(),
   };
 
+  // We treat undefined / null as "not provided"
+  if (user.name !== undefined) updateFields.name = user.name;
+  if (user.avatar !== undefined) updateFields.avatar = user.avatar;
+
+  // these 3 are important - DON'T overwrite unless provided
+  if (user.bloodGroup !== undefined) updateFields.bloodGroup = user.bloodGroup;
+  if (user.district !== undefined) updateFields.district = user.district;
+  if (user.upazila !== undefined) updateFields.upazila = user.upazila;
+
   const updateDoc = existing
-    ? { $set: profileFields }
+    ? { $set: updateFields }
     : {
-        $set: profileFields,
+        $set: {
+          // new user: set defaults (empty allowed)
+          name: user.name || "",
+          email: user.email,
+          avatar: user.avatar || "",
+          bloodGroup: user.bloodGroup || "",
+          district: user.district || "",
+          upazila: user.upazila || "",
+          updatedAt: new Date(),
+        },
         $setOnInsert: {
           role: "donor",
           status: "active",
@@ -233,7 +255,6 @@ app.put("/users", async (req, res) => {
 
   res.send(result);
 });
-
 app.get("/users", verifyJWT, verifyRole("admin"), async (req, res) => {
   const result = await usersCollection.find().toArray();
   res.send(result);
